@@ -1705,8 +1705,7 @@ rt_mutex_slowlock(struct rt_mutex *lock, int state,
 	set_current_state(TASK_RUNNING);
 
 	if (unlikely(ret)) {
-		if (rt_mutex_has_waiters(lock))
-			remove_waiter(lock, &waiter);
+		remove_waiter(lock, &waiter);
 		/* ww_mutex want to report EDEADLK/EALREADY, let them */
 		if (!ww_ctx)
 			rt_mutex_handle_deadlock(ret, chwalk, &waiter);
