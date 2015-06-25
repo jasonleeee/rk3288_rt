@@ -1,0 +1,15 @@
+Rockchip rk3288 timer
+
+Required properties:
+- compatible: shall be "rockchip,rk3288-timer"
+- reg: base address of the timer register starting with TIMERS CONTROL register
+- interrupts: should contain the interrupts for Timer0
+- clock-frequency: the frequency the timer is running
+
+Example:
+	timer: timer@ff810000 {
+		compatible = "rockchip,rk3288-timer";
+		reg = <0xff810000 0x20>;
+		interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
+		clock-frequency = <24000000>;
+	};
