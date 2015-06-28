@@ -21,8 +21,10 @@
 #include <linux/init.h>
 #include <linux/linkage.h>
 
+#include <asm/alternative-asm.h>
 #include <asm/assembler.h>
 #include <asm/asm-offsets.h>
+#include <asm/cpufeature.h>
 #include <asm/errno.h>
 #include <asm/esr.h>
 #include <asm/thread_info.h>
@@ -118,6 +120,24 @@
 	.if	\el == 0
 	ct_user_enter
 	ldr	x23, [sp, #S_SP]		// load return stack pointer
+
+#ifdef CONFIG_ARM64_ERRATUM_845719
+	alternative_insn						\
+	"nop",								\
+	"tbz x22, #4, 1f",						\
+	ARM64_WORKAROUND_845719
+#ifdef CONFIG_PID_IN_CONTEXTIDR
+	alternative_insn						\
+	"nop; nop",							\
+	"mrs x29, contextidr_el1; msr contextidr_el1, x29; 1:",		\
+	ARM64_WORKAROUND_845719
+#else
+	alternative_insn						\
+	"nop",								\
+	"msr contextidr_el1, xzr; 1:",					\
+	ARM64_WORKAROUND_845719
+#endif
+#endif
 	.endif
 	.if	\ret
 	ldr	x1, [sp, #S_X1]			// preserve x0 (syscall return)
@@ -347,11 +367,16 @@ el1_irq:
 #ifdef CONFIG_PREEMPT
 	get_thread_info tsk
 	ldr	w24, [tsk, #TI_PREEMPT]		// get preempt count
-	cbnz	w24, 1f				// preempt count != 0
+	cbnz	w24, 2f				// preempt count != 0
 	ldr	x0, [tsk, #TI_FLAGS]		// get flags
-	tbz	x0, #TIF_NEED_RESCHED, 1f	// needs rescheduling?
-	bl	el1_preempt
+	tbnz	x0, #TIF_NEED_RESCHED, 1f	// needs rescheduling?
+
+	ldr	w24, [tsk, #TI_PREEMPT_LAZY]	// get preempt lazy count
+	cbnz	w24, 2f				// preempt lazy count != 0
+	tbz	x0, #TIF_NEED_RESCHED_LAZY, 2f	// needs rescheduling?
 1:
+	bl	el1_preempt
+2:
 #endif
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_on
@@ -365,6 +390,7 @@ el1_preempt:
 1:	bl	preempt_schedule_irq		// irq en/disable is done inside
 	ldr	x0, [tsk, #TI_FLAGS]		// get new tasks TI_FLAGS
 	tbnz	x0, #TIF_NEED_RESCHED, 1b	// needs rescheduling?
+	tbnz	x0, #TIF_NEED_RESCHED_LAZY, 1b	// needs rescheduling?
 	ret	x24
 #endif
 
@@ -601,6 +627,7 @@ fast_work_pending:
 	str	x0, [sp, #S_X0]			// returned x0
 work_pending:
 	tbnz	x1, #TIF_NEED_RESCHED, work_resched
+	tbnz	x1, #TIF_NEED_RESCHED_LAZY, work_resched
 	/* TIF_SIGPENDING, TIF_NOTIFY_RESUME or TIF_FOREIGN_FPSTATE case */
 	ldr	x2, [sp, #S_PSTATE]
 	mov	x0, sp				// 'regs'
